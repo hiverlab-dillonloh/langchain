@@ -15,7 +15,6 @@ from pydantic import BaseModel, root_validator
 from langchain.agents.agent_iterator import AgentExecutorIterator
 from langchain.agents.agent_types import AgentType
 from langchain.agents.tools import InvalidTool
-from langchain.base_language import BaseLanguageModel
 from langchain.callbacks.base import BaseCallbackManager
 from langchain.callbacks.manager import (
     AsyncCallbackManagerForChainRun,
@@ -27,15 +26,16 @@ from langchain.callbacks.manager import (
 from langchain.chains.base import Chain
 from langchain.chains.llm import LLMChain
 from langchain.input import get_color_mapping
-from langchain.prompts.base import BasePromptTemplate
 from langchain.prompts.few_shot import FewShotPromptTemplate
 from langchain.prompts.prompt import PromptTemplate
 from langchain.schema import (
     AgentAction,
     AgentFinish,
     BaseOutputParser,
+    BasePromptTemplate,
     OutputParserException,
 )
+from langchain.schema.language_model import BaseLanguageModel
 from langchain.schema.messages import BaseMessage
 from langchain.tools.base import BaseTool
 from langchain.utilities.asyncio import asyncio_timeout
@@ -660,6 +660,9 @@ s
      as an argument, and the result of that function will be passed to the agent
       as an observation.
     """
+    trim_intermediate_steps: Union[
+        int, Callable[[List[Tuple[AgentAction, str]]], List[Tuple[AgentAction, str]]]
+    ] = -1
 
     @classmethod
     def from_agent_and_tools(
@@ -807,6 +810,8 @@ s
         Override this to take control of how the agent makes and acts on choices.
         """
         try:
+            intermediate_steps = self._prepare_intermediate_steps(intermediate_steps)
+
             # Call the LLM to see what to do.
             output = self.agent.plan(
                 intermediate_steps,
@@ -898,6 +903,8 @@ s
         Override this to take control of how the agent makes and acts on choices.
         """
         try:
+            intermediate_steps = self._prepare_intermediate_steps(intermediate_steps)
+
             # Call the LLM to see what to do.
             output = await self.agent.aplan(
                 intermediate_steps,
@@ -1107,3 +1114,16 @@ s
                     "",
                 )
         return None
+
+    def _prepare_intermediate_steps(
+        self, intermediate_steps: List[Tuple[AgentAction, str]]
+    ) -> List[Tuple[AgentAction, str]]:
+        if (
+            isinstance(self.trim_intermediate_steps, int)
+            and self.trim_intermediate_steps > 0
+        ):
+            return intermediate_steps[-self.trim_intermediate_steps :]
+        elif callable(self.trim_intermediate_steps):
+            return self.trim_intermediate_steps(intermediate_steps)
+        else:
+            return intermediate_steps
